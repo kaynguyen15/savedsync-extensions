@@ -6,11 +6,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load initial stats
   await loadStats();
   
-  // Set up event listeners
-  document.getElementById('syncButton').addEventListener('click', syncNow);
-  document.getElementById('settingsLink').addEventListener('click', openSettings);
-  document.getElementById('exportLink').addEventListener('click', exportData);
-  document.getElementById('helpLink').addEventListener('click', openHelp);
+  // Set up event listeners with null checks
+  const syncButton = document.getElementById('syncButton');
+  const settingsLink = document.getElementById('settingsLink');
+  const exportLink = document.getElementById('exportLink');
+  const helpLink = document.getElementById('helpLink');
+  
+  if (syncButton) syncButton.addEventListener('click', syncNow);
+  if (settingsLink) settingsLink.addEventListener('click', openSettings);
+  if (exportLink) exportLink.addEventListener('click', exportData);
+  if (helpLink) helpLink.addEventListener('click', openHelp);
   
   // Auto-refresh stats every 30 seconds
   setInterval(loadStats, 30000);
@@ -27,10 +32,14 @@ async function loadStats() {
     
     console.log('Stats received:', stats);
     
-    // Update UI
-    document.getElementById('totalItems').textContent = stats.totalItems || 0;
-    document.getElementById('todayItems').textContent = stats.todayItems || 0;
-    document.getElementById('platforms').textContent = stats.platforms || 0;
+    // Update UI with null checks
+    const totalItemsEl = document.getElementById('totalItems');
+    const todayItemsEl = document.getElementById('todayItems');
+    const platformsEl = document.getElementById('platforms');
+    
+    if (totalItemsEl) totalItemsEl.textContent = stats.totalItems || 0;
+    if (todayItemsEl) todayItemsEl.textContent = stats.todayItems || 0;
+    if (platformsEl) platformsEl.textContent = stats.platforms || 0;
     
     // Update platform list
     updatePlatformList(stats.platformCounts || {});
@@ -48,6 +57,7 @@ function updatePlatformList(platformCounts) {
   const platformList = document.getElementById('platformList');
   
   if (Object.keys(platformCounts).length === 0) {
+    // Use textContent for static content to prevent XSS
     platformList.innerHTML = `
       <div class="empty-state">
         <h3>No saved items yet</h3>
@@ -73,19 +83,33 @@ function updatePlatformList(platformCounts) {
     twitter: 'Twitter'
   };
   
+  // Sanitize platform names to prevent XSS
+  const sanitizeHTML = (str) => {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  };
+  
   platformList.innerHTML = Object.entries(platformCounts)
     .sort(([,a], [,b]) => b - a) // Sort by count descending
-    .map(([platform, count]) => `
-      <div class="platform-item">
-        <div class="platform-info">
-          <div class="platform-icon ${platform}">
-            ${platformIcons[platform] || platform.substr(0, 2).toUpperCase()}
+    .map(([platform, count]) => {
+      const safePlatform = sanitizeHTML(platform);
+      const safeCount = sanitizeHTML(count.toString());
+      const safeIcon = sanitizeHTML(platformIcons[platform] || platform.substr(0, 2).toUpperCase());
+      const safeName = sanitizeHTML(platformNames[platform] || platform);
+      
+      return `
+        <div class="platform-item">
+          <div class="platform-info">
+            <div class="platform-icon ${safePlatform}">
+              ${safeIcon}
+            </div>
+            <span class="platform-name">${safeName}</span>
           </div>
-          <span class="platform-name">${platformNames[platform] || platform}</span>
+          <span class="item-count">${safeCount}</span>
         </div>
-        <span class="item-count">${count}</span>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 }
 
 function updateStatus(stats) {

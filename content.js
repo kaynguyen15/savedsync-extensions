@@ -1,9 +1,15 @@
 // content.js - Detects saved items on social media platforms
 
+// Global instance to prevent multiple detectors
+let globalDetector = null;
+
 class SavedItemDetector {
   constructor() {
     this.platform = this.detectPlatform();
     this.processedItems = new Set(); // Track processed items
+    this.observer = null;
+    this.scanInterval = null;
+    this.navigationInterval = null;
     console.log(`SavedSync: Initialized on ${this.platform}`);
     this.init();
   }
@@ -33,13 +39,29 @@ class SavedItemDetector {
     this.observeDOM();
     
     // Periodic scan for missed items
-    setInterval(() => {
+    this.scanInterval = setInterval(() => {
       this.scanForSavedItems();
     }, 10000); // Every 10 seconds
   }
   
+  cleanup() {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+    if (this.scanInterval) {
+      clearInterval(this.scanInterval);
+      this.scanInterval = null;
+    }
+    if (this.navigationInterval) {
+      clearInterval(this.navigationInterval);
+      this.navigationInterval = null;
+    }
+    this.processedItems.clear();
+  }
+  
   observeDOM() {
-    const observer = new MutationObserver((mutations) => {
+    this.observer = new MutationObserver((mutations) => {
       let shouldScan = false;
       
       mutations.forEach((mutation) => {
@@ -71,7 +93,7 @@ class SavedItemDetector {
       }
     });
     
-    observer.observe(document.body, {
+    this.observer.observe(document.body, {
       childList: true,
       subtree: true,
       attributes: true,
@@ -407,11 +429,25 @@ class SavedItemDetector {
   }
   
   sendToBackground(item) {
-    console.log('SavedSync: Detected saved item:', item);
+    // Sanitize item data to prevent injection attacks
+    const sanitizedItem = {
+      platform: String(item.platform || '').substring(0, 50),
+      type: String(item.type || '').substring(0, 20),
+      author: String(item.author || '').substring(0, 100),
+      content: String(item.content || '').substring(0, 1000),
+      url: String(item.url || '').substring(0, 500),
+      image: item.image ? String(item.image).substring(0, 500) : null,
+      thumbnail: item.thumbnail ? String(item.thumbnail).substring(0, 500) : null,
+      engagement: item.engagement ? {
+        likes: String(item.engagement.likes || '0').substring(0, 20)
+      } : null
+    };
+    
+    console.log('SavedSync: Detected saved item:', sanitizedItem);
     
     chrome.runtime.sendMessage({
       type: 'SAVED_ITEM_DETECTED',
-      data: item
+      data: sanitizedItem
     }).catch(error => {
       console.error('Error sending to background:', error);
     });
@@ -419,21 +455,29 @@ class SavedItemDetector {
 }
 
 // Initialize detector when page loads
+function initializeDetector() {
+  if (globalDetector) {
+    globalDetector.cleanup();
+  }
+  globalDetector = new SavedItemDetector();
+}
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    new SavedItemDetector();
-  });
+  document.addEventListener('DOMContentLoaded', initializeDetector);
 } else {
-  new SavedItemDetector();
+  initializeDetector();
 }
 
 // Also initialize on navigation (for SPAs)
 let currentUrl = window.location.href;
-setInterval(() => {
+const navigationInterval = setInterval(() => {
   if (window.location.href !== currentUrl) {
     currentUrl = window.location.href;
-    setTimeout(() => {
-      new SavedItemDetector();
-    }, 2000);
+    setTimeout(initializeDetector, 2000);
   }
 }, 1000);
+
+// Store interval reference for cleanup
+if (globalDetector) {
+  globalDetector.navigationInterval = navigationInterval;
+}

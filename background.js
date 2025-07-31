@@ -22,6 +22,33 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+// Cleanup old data periodically (every 24 hours)
+setInterval(async () => {
+  try {
+    const result = await chrome.storage.local.get(['savedItems']);
+    const savedItems = result.savedItems || [];
+    
+    if (savedItems.length > 0) {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      // Remove items older than 30 days
+      const filteredItems = savedItems.filter(item => {
+        const itemDate = new Date(item.savedDate);
+        return itemDate > thirtyDaysAgo;
+      });
+      
+      if (filteredItems.length !== savedItems.length) {
+        await chrome.storage.local.set({ savedItems: filteredItems });
+        console.log(`Cleaned up ${savedItems.length - filteredItems.length} old items`);
+        await updateStats();
+      }
+    }
+  } catch (error) {
+    console.error('Error during cleanup:', error);
+  }
+}, 24 * 60 * 60 * 1000); // 24 hours
+
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Background received message:', message.type);
@@ -71,7 +98,27 @@ async function handleSavedItem(item) {
         savedItems.splice(1000);
       }
       
-      await chrome.storage.local.set({ savedItems });
+      try {
+        await chrome.storage.local.set({ savedItems });
+      } catch (storageError) {
+        // Handle storage quota exceeded
+        if (storageError.message.includes('QUOTA_BYTES_PER_ITEM') || 
+            storageError.message.includes('QUOTA_BYTES')) {
+          console.warn('Storage quota exceeded, cleaning up old items');
+          
+          // Remove oldest 100 items to free space
+          savedItems.splice(-100);
+          await chrome.storage.local.set({ savedItems });
+          
+          // Try again with reduced data
+          if (savedItems.length > 500) {
+            savedItems.splice(500);
+            await chrome.storage.local.set({ savedItems });
+          }
+        } else {
+          throw storageError;
+        }
+      }
       
       // Update stats
       await updateStats();
@@ -93,8 +140,18 @@ async function handleSavedItem(item) {
   }
 }
 
+// Stats update lock to prevent race conditions
+let statsUpdateInProgress = false;
+
 // Update statistics
 async function updateStats() {
+  if (statsUpdateInProgress) {
+    console.log('Stats update already in progress, skipping');
+    return null;
+  }
+  
+  statsUpdateInProgress = true;
+  
   try {
     const result = await chrome.storage.local.get(['savedItems']);
     const savedItems = result.savedItems || [];
@@ -116,6 +173,8 @@ async function updateStats() {
   } catch (error) {
     console.error('Error updating stats:', error);
     return null;
+  } finally {
+    statsUpdateInProgress = false;
   }
 }
 
@@ -158,24 +217,50 @@ async function syncToServer() {
       return { success: false, message: 'Sync not configured' };
     }
     
-    // Send to server
-    const response = await fetch(`https://savedsync-backend.onrender.com/api/sync/bulk`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${syncSettings.apiKey}`
-      },
-      body: JSON.stringify({ 
-        items: savedItems,
-        timestamp: new Date().toISOString()
-      })
-    });
+    // Validate API key
+    if (!syncSettings.apiKey || syncSettings.apiKey.trim() === '') {
+      console.log('No API key configured, skipping server sync');
+      return { success: false, message: 'No API key configured' };
+    }
     
-    if (response.ok) {
-      console.log('Successfully synced to server');
-      return { success: true, message: 'Synced successfully' };
-    } else {
-      throw new Error(`Server responded with ${response.status}`);
+    // Limit payload size to prevent timeout
+    const maxItems = 100;
+    const itemsToSync = savedItems.slice(0, maxItems);
+    
+    // Send to server with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    try {
+      const response = await fetch(`https://savedsync-backend.onrender.com/api/sync/bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${syncSettings.apiKey}`
+        },
+        body: JSON.stringify({ 
+          items: itemsToSync,
+          timestamp: new Date().toISOString()
+        }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        console.log('Successfully synced to server');
+        return { success: true, message: 'Synced successfully' };
+      } else {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Server responded with ${response.status}: ${errorText}`);
+      }
+      
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        throw new Error('Request timeout');
+      }
+      throw fetchError;
     }
     
   } catch (error) {
