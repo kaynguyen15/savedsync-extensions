@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "SavedSync Collector",
+  "version": "1.0",
+  "description": "Automatically collect your saved items from social media platforms",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://www.facebook.com/*",
+    "https://www.tiktok.com/*",
+    "https://www.threads.net/*",
+    "https://twitter.com/*",
+    "https://x.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.instagram.com/*",
+        "https://www.facebook.com/*",
+        "https://www.tiktok.com/*",
+        "https://www.threads.net/*",
+        "https://twitter.com/*",
+        "https://x.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SavedSync"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

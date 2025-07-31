@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      width: 380px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f8f9fa;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+    
+    .header .subtitle {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+    
+    .stats {
+      display: flex;
+      justify-content: space-around;
+      padding: 20px 15px;
+      background: white;
+      border-bottom: 1px solid #e9ecef;
+    }
+    
+    .stat {
+      text-align: center;
+      flex: 1;
+    }
+    
+    .stat-number {
+      font-size: 24px;
+      font-weight: bold;
+      color: #495057;
+      margin-bottom: 4px;
+    }
+    
+    .stat-label {
+      font-size: 11px;
+      color: #6c757d;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+    
+    .content {
+      padding: 20px;
+      background: white;
+    }
+    
+    .sync-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 15px;
+      background: #e7f3ff;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      border: 1px solid #bee5eb;
+    }
+    
+    .sync-status.success {
+      background: #d4edda;
+      border-color: #c3e6cb;
+    }
+    
+    .sync-status.error {
+      background: #f8d7da;
+      border-color: #f5c6cb;
+    }
+    
+    .sync-button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    
+    .sync-button:hover {
+      background: #0056b3;
+    }
+    
+    .sync-button:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+    
+    .platform-list {
+      margin-top: 20px;
+    }
+    
+    .platform-list h3 {
+      font-size: 14px;
+      color: #495057;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+    
+    .platform-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .platform-item:last-child {
+      border-bottom: none;
+    }
+    
+    .platform-info {
+      display: flex;
+      align-items: center;
+    }
+    
+    .platform-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      margin-right: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+    
+    .platform-icon.instagram {
+      background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+      color: white;
+    }
+    
+    .platform-icon.tiktok {
+      background: #000;
+      color: white;
+    }
+    
+    .platform-icon.facebook {
+      background: #1877f2;
+      color: white;
+    }
+    
+    .platform-icon.threads {
+      background: #000;
+      color: white;
+    }
+    
+    .platform-icon.twitter {
+      background: #1da1f2;
+      color: white;
+    }
+    
+    .platform-name {
+      font-weight: 500;
+      color: #495057;
+      font-size: 14px;
+    }
+    
+    .item-count {
+      background: #e9ecef;
+      color: #495057;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    
+    .footer {
+      padding: 15px 20px;
+      border-top: 1px solid #e9ecef;
+      background: #f8f9fa;
+      text-align: center;
+    }
+    
+    .footer-links {
+      display: flex;
+      justify-content: space-around;
+      gap: 15px;
+    }
+    
+    .footer-links a {
+      color: #6c757d;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    
+    .footer-links a:hover {
+      color: #007bff;
+    }
+    
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #007bff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 10px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 30px 20px;
+      color: #6c757d;
+    }
+    
+    .empty-state h3 {
+      font-size: 16px;
+      margin-bottom: 8px;
+      color: #495057;
+    }
+    
+    .empty-state p {
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 8px;
+    }
+    
+    .status-indicator.active {
+      background: #28a745;
+    }
+    
+    .status-indicator.inactive {
+      background: #dc3545;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>SavedSync</h1>
+    <div class="subtitle">Social Media Bookmark Collector</div>
+  </div>
+  
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-number" id="totalItems">-</div>
+      <div class="stat-label">Total Items</div>
+    </div>
+    <div class="stat">
+      <div class="stat-number" id="todayItems">-</div>
+      <div class="stat-label">Today</div>
+    </div>
+    <div class="stat">
+      <div class="stat-number" id="platforms">-</div>
+      <div class="stat-label">Platforms</div>
+    </div>
+  </div>
+  
+  <div class="content">
+    <div class="sync-status" id="syncStatus">
+      <div>
+        <span class="status-indicator active" id="statusIndicator"></span>
+        <span id="statusText">Loading...</span>
+      </div>
+      <button class="sync-button" id="syncButton">Sync Now</button>
+    </div>
+    
+    <div class="platform-list">
+      <h3>Detected Platforms</h3>
+      <div id="platformList">
+        <div class="loading">
+          <div class="spinner"></div>
+          <span>Loading stats...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="footer">
+    <div class="footer-links">
+      <a href="#" id="settingsLink">Settings</a>
+      <a href="#" id="exportLink">Export Data</a>
+      <a href="#" id="helpLink">Help</a>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
