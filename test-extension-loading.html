@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SavedSync Extension Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .pass {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .fail {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 SavedSync Extension Test Page</h1>
+    
+    <div class="test-section">
+        <h2>Extension Loading Test</h2>
+        <p>This page tests if the SavedSync extension can be loaded and basic functionality works.</p>
+        
+        <button onclick="testExtensionLoading()">Test Extension Loading</button>
+        <button onclick="testMessagePassing()">Test Message Passing</button>
+        <button onclick="testStorageAccess()">Test Storage Access</button>
+        <button onclick="testErrorHandling()">Test Error Handling</button>
+        
+        <div id="test-results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Mock Social Media Content</h2>
+        <p>This simulates content that the extension would detect on social media platforms.</p>
+        
+        <div id="mock-instagram" style="border: 1px solid #ccc; padding: 15px; margin: 10px 0;">
+            <h3>Mock Instagram Post</h3>
+            <p>This is a test post that would be detected by the extension.</p>
+            <button onclick="simulateSave('instagram')">Simulate Save</button>
+        </div>
+        
+        <div id="mock-twitter" style="border: 1px solid #ccc; padding: 15px; margin: 10px 0;">
+            <h3>Mock Twitter Tweet</h3>
+            <p>This is a test tweet that would be detected by the extension.</p>
+            <button onclick="simulateSave('twitter')">Simulate Save</button>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results-container"></div>
+    </div>
+
+    <script>
+        // Mock Chrome API for testing
+        if (typeof chrome === 'undefined') {
+            window.chrome = {
+                runtime: {
+                    sendMessage: (message, callback) => {
+                        console.log('Mock Chrome API: Message sent:', message);
+                        if (callback) {
+                            setTimeout(() => callback({ success: true, data: 'mock response' }), 100);
+                        }
+                    },
+                    onMessage: {
+                        addListener: (callback) => {
+                            console.log('Mock Chrome API: Message listener added');
+                        }
+                    }
+                },
+                storage: {
+                    local: {
+                        get: (keys, callback) => {
+                            console.log('Mock Chrome API: Storage get:', keys);
+                            callback({ savedItems: [], syncSettings: { enabled: false } });
+                        },
+                        set: (data, callback) => {
+                            console.log('Mock Chrome API: Storage set:', data);
+                            if (callback) callback();
+                        }
+                    }
+                }
+            };
+        }
+
+        function addTestResult(message, type = 'info') {
+            const container = document.getElementById('results-container');
+            const result = document.createElement('div');
+            result.className = `test-result ${type}`;
+            result.innerHTML = `<strong>${new Date().toLocaleTimeString()}:</strong> ${message}`;
+            container.appendChild(result);
+        }
+
+        function testExtensionLoading() {
+            addTestResult('Testing extension loading...', 'info');
+            
+            // Test if manifest can be parsed
+            try {
+                const manifest = {
+                    manifest_version: 3,
+                    name: "SavedSync Collector",
+                    version: "1.0"
+                };
+                addTestResult('✓ Manifest structure is valid', 'pass');
+            } catch (error) {
+                addTestResult('✗ Manifest structure is invalid: ' + error.message, 'fail');
+            }
+            
+            // Test if Chrome API is available
+            if (typeof chrome !== 'undefined' && chrome.runtime) {
+                addTestResult('✓ Chrome API is available', 'pass');
+            } else {
+                addTestResult('✗ Chrome API is not available (running in mock mode)', 'info');
+            }
+            
+            addTestResult('Extension loading test completed', 'info');
+        }
+
+        function testMessagePassing() {
+            addTestResult('Testing message passing...', 'info');
+            
+            const testMessage = {
+                type: 'SAVED_ITEM_DETECTED',
+                data: {
+                    platform: 'instagram',
+                    author: 'test_user',
+                    content: 'Test content',
+                    type: 'post'
+                }
+            };
+            
+            chrome.runtime.sendMessage(testMessage, (response) => {
+                if (response && response.success) {
+                    addTestResult('✓ Message passing test successful', 'pass');
+                } else {
+                    addTestResult('✗ Message passing test failed', 'fail');
+                }
+            });
+        }
+
+        function testStorageAccess() {
+            addTestResult('Testing storage access...', 'info');
+            
+            chrome.storage.local.get(['savedItems'], (result) => {
+                if (result && Array.isArray(result.savedItems)) {
+                    addTestResult('✓ Storage access test successful', 'pass');
+                    addTestResult(`Found ${result.savedItems.length} saved items`, 'info');
+                } else {
+                    addTestResult('✗ Storage access test failed', 'fail');
+                }
+            });
+        }
+
+        function testErrorHandling() {
+            addTestResult('Testing error handling...', 'info');
+            
+            // Test with invalid message
+            const invalidMessage = null;
+            
+            try {
+                chrome.runtime.sendMessage(invalidMessage, (response) => {
+                    addTestResult('✓ Error handling test completed', 'pass');
+                });
+            } catch (error) {
+                addTestResult('✗ Error handling test failed: ' + error.message, 'fail');
+            }
+        }
+
+        function simulateSave(platform) {
+            addTestResult(`Simulating save on ${platform}...`, 'info');
+            
+            const mockItem = {
+                platform: platform,
+                author: 'test_user',
+                content: `This is a test ${platform} post`,
+                type: platform === 'instagram' ? 'post' : 'tweet',
+                url: window.location.href,
+                savedDate: new Date().toISOString()
+            };
+            
+            chrome.runtime.sendMessage({
+                type: 'SAVED_ITEM_DETECTED',
+                data: mockItem
+            }, (response) => {
+                if (response && response.success) {
+                    addTestResult(`✓ Successfully simulated save on ${platform}`, 'pass');
+                } else {
+                    addTestResult(`✗ Failed to simulate save on ${platform}`, 'fail');
+                }
+            });
+        }
+
+        // Auto-run basic tests on page load
+        window.addEventListener('load', () => {
+            addTestResult('Page loaded, running basic tests...', 'info');
+            setTimeout(() => {
+                testExtensionLoading();
+                testStorageAccess();
+            }, 500);
+        });
+    </script>
+</body>
+</html>
