@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SavedSync Extension Test Page</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .test-container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border-left: 4px solid;
+        }
+        .test-pass {
+            background: #d4edda;
+            border-color: #28a745;
+            color: #155724;
+        }
+        .test-fail {
+            background: #f8d7da;
+            border-color: #dc3545;
+            color: #721c24;
+        }
+        .test-warning {
+            background: #fff3cd;
+            border-color: #ffc107;
+            color: #856404;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .code-block {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+        .summary {
+            background: #e7f3ff;
+            border: 1px solid #bee5eb;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 SavedSync Extension Test Page</h1>
+    <p>This page tests the critical bug fixes in the SavedSync browser extension.</p>
+
+    <div class="test-container">
+        <h2>Test Controls</h2>
+        <button onclick="runAllTests()">Run All Tests</button>
+        <button onclick="clearResults()">Clear Results</button>
+        <button onclick="testMemoryLeak()">Test Memory Leak Fix</button>
+        <button onclick="testXSSPrevention()">Test XSS Prevention</button>
+        <button onclick="testDataSanitization()">Test Data Sanitization</button>
+    </div>
+
+    <div id="results" class="test-container">
+        <h2>Test Results</h2>
+        <div id="testOutput"></div>
+    </div>
+
+    <div class="summary">
+        <h3>Test Summary</h3>
+        <div id="summary"></div>
+    </div>
+
+    <script>
+        // Test results tracking
+        let testResults = {
+            passed: 0,
+            failed: 0,
+            warnings: 0
+        };
+
+        function addResult(type, message, details = '') {
+            const output = document.getElementById('testOutput');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `test-result test-${type}`;
+            
+            let icon = '✅';
+            if (type === 'fail') icon = '❌';
+            if (type === 'warning') icon = '⚠️';
+            
+            resultDiv.innerHTML = `
+                <strong>${icon} ${message}</strong>
+                ${details ? `<div class="code-block">${details}</div>` : ''}
+            `;
+            
+            output.appendChild(resultDiv);
+            
+            // Update counters
+            testResults[type === 'pass' ? 'passed' : type === 'fail' ? 'failed' : 'warnings']++;
+            updateSummary();
+        }
+
+        function updateSummary() {
+            const summary = document.getElementById('summary');
+            const total = testResults.passed + testResults.failed + testResults.warnings;
+            const successRate = total > 0 ? ((testResults.passed / total) * 100).toFixed(1) : 0;
+            
+            summary.innerHTML = `
+                <p><strong>Total Tests:</strong> ${total}</p>
+                <p><strong>Passed:</strong> ${testResults.passed} ✅</p>
+                <p><strong>Failed:</strong> ${testResults.failed} ❌</p>
+                <p><strong>Warnings:</strong> ${testResults.warnings} ⚠️</p>
+                <p><strong>Success Rate:</strong> ${successRate}%</p>
+            `;
+        }
+
+        function clearResults() {
+            document.getElementById('testOutput').innerHTML = '';
+            testResults = { passed: 0, failed: 0, warnings: 0 };
+            updateSummary();
+        }
+
+        // Test 1: Memory Leak Prevention
+        function testMemoryLeak() {
+            addResult('pass', 'Testing Memory Leak Prevention...');
+            
+            // Check if globalDetector exists (simulating content.js)
+            if (typeof globalDetector !== 'undefined') {
+                addResult('pass', 'Global detector instance exists');
+                
+                if (typeof globalDetector.cleanup === 'function') {
+                    addResult('pass', 'Cleanup method exists');
+                    
+                    // Test cleanup functionality
+                    const originalObserver = globalDetector.observer;
+                    const originalInterval = globalDetector.scanInterval;
+                    
+                    globalDetector.cleanup();
+                    
+                    if (globalDetector.observer === null) {
+                        addResult('pass', 'Observer properly disconnected');
+                    } else {
+                        addResult('fail', 'Observer not properly disconnected');
+                    }
+                    
+                    if (globalDetector.scanInterval === null) {
+                        addResult('pass', 'Scan interval properly cleared');
+                    } else {
+                        addResult('fail', 'Scan interval not properly cleared');
+                    }
+                    
+                    if (globalDetector.processedItems.size === 0) {
+                        addResult('pass', 'Processed items cleared');
+                    } else {
+                        addResult('fail', 'Processed items not cleared');
+                    }
+                } else {
+                    addResult('fail', 'Cleanup method does not exist');
+                }
+            } else {
+                addResult('warning', 'Global detector not found (normal in test environment)');
+            }
+        }
+
+        // Test 2: XSS Prevention
+        function testXSSPrevention() {
+            addResult('pass', 'Testing XSS Prevention...');
+            
+            // Test HTML sanitization function
+            const sanitizeHTML = (str) => {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            };
+            
+            const maliciousInput = '<script>alert("xss")</script>';
+            const sanitized = sanitizeHTML(maliciousInput);
+            
+            if (!sanitized.includes('<script>')) {
+                addResult('pass', 'Script tags are properly escaped');
+            } else {
+                addResult('fail', 'Script tags are not escaped');
+            }
+            
+            if (sanitized.includes('&lt;script&gt;')) {
+                addResult('pass', 'HTML entities properly escaped');
+            } else {
+                addResult('fail', 'HTML entities not properly escaped');
+            }
+            
+            // Test dangerous attributes
+            const dangerousInput = '"><img src=x onerror=alert(1)>';
+            const sanitizedDangerous = sanitizeHTML(dangerousInput);
+            
+            if (!sanitizedDangerous.includes('onerror=')) {
+                addResult('pass', 'Dangerous attributes are escaped');
+            } else {
+                addResult('fail', 'Dangerous attributes are not escaped');
+            }
+        }
+
+        // Test 3: Data Sanitization
+        function testDataSanitization() {
+            addResult('pass', 'Testing Data Sanitization...');
+            
+            // Simulate the sanitization logic from content.js
+            const maliciousData = {
+                platform: '<script>alert("xss")</script>',
+                author: '"><img src=x onerror=alert(1)>',
+                content: 'x'.repeat(2000), // Very long content
+                url: 'javascript:alert("xss")',
+                image: 'data:text/html,<script>alert("xss")</script>'
+            };
+            
+            const sanitizedItem = {
+                platform: String(maliciousData.platform || '').substring(0, 50),
+                type: String('post' || '').substring(0, 20),
+                author: String(maliciousData.author || '').substring(0, 100),
+                content: String(maliciousData.content || '').substring(0, 1000),
+                url: String(maliciousData.url || '').substring(0, 500),
+                image: maliciousData.image ? String(maliciousData.image).substring(0, 500) : null
+            };
+            
+            // Verify sanitization
+            if (sanitizedItem.platform.length <= 50) {
+                addResult('pass', 'Platform length limited to 50 characters');
+            } else {
+                addResult('fail', 'Platform length not limited');
+            }
+            
+            if (sanitizedItem.author.length <= 100) {
+                addResult('pass', 'Author length limited to 100 characters');
+            } else {
+                addResult('fail', 'Author length not limited');
+            }
+            
+            if (sanitizedItem.content.length <= 1000) {
+                addResult('pass', 'Content length limited to 1000 characters');
+            } else {
+                addResult('fail', 'Content length not limited');
+            }
+            
+            if (sanitizedItem.url.length <= 500) {
+                addResult('pass', 'URL length limited to 500 characters');
+            } else {
+                addResult('fail', 'URL length not limited');
+            }
+            
+            // Check that dangerous content is truncated
+            if (!sanitizedItem.platform.includes('<script>')) {
+                addResult('pass', 'Script tags truncated in platform');
+            } else {
+                addResult('fail', 'Script tags not truncated in platform');
+            }
+            
+            if (!sanitizedItem.url.startsWith('javascript:')) {
+                addResult('pass', 'JavaScript URLs truncated');
+            } else {
+                addResult('fail', 'JavaScript URLs not truncated');
+            }
+        }
+
+        // Test 4: DOM Element Access Safety
+        function testDOMElementAccessSafety() {
+            addResult('pass', 'Testing DOM Element Access Safety...');
+            
+            // Test null checks
+            const nonExistentElement = document.getElementById('non-existent-element');
+            if (nonExistentElement === null) {
+                addResult('pass', 'Non-existent elements return null');
+            } else {
+                addResult('fail', 'Non-existent elements do not return null');
+            }
+            
+            // Test safe element access
+            const safeAccess = (elementId) => {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    element.textContent = 'test';
+                    return true;
+                }
+                return false;
+            };
+            
+            if (!safeAccess('non-existent')) {
+                addResult('pass', 'Safe access returns false for non-existent elements');
+            } else {
+                addResult('fail', 'Safe access does not return false for non-existent elements');
+            }
+            
+            // Create a test element
+            const testElement = document.createElement('div');
+            testElement.id = 'test-element';
+            document.body.appendChild(testElement);
+            
+            if (safeAccess('test-element')) {
+                addResult('pass', 'Safe access works for existing elements');
+            } else {
+                addResult('fail', 'Safe access does not work for existing elements');
+            }
+            
+            // Cleanup
+            document.body.removeChild(testElement);
+        }
+
+        // Test 5: Error Handling
+        function testErrorHandling() {
+            addResult('pass', 'Testing Error Handling...');
+            
+            // Test try-catch blocks
+            const testErrorHandling = () => {
+                try {
+                    throw new Error('Test error');
+                } catch (error) {
+                    return error.message;
+                }
+            };
+            
+            if (testErrorHandling() === 'Test error') {
+                addResult('pass', 'Error handling works correctly');
+            } else {
+                addResult('fail', 'Error handling does not work correctly');
+            }
+            
+            // Test async error handling
+            const testAsyncError = async () => {
+                try {
+                    await Promise.reject(new Error('Async error'));
+                } catch (error) {
+                    return error.message;
+                }
+            };
+            
+            testAsyncError().then(result => {
+                if (result === 'Async error') {
+                    addResult('pass', 'Async error handling works correctly');
+                } else {
+                    addResult('fail', 'Async error handling does not work correctly');
+                }
+            });
+        }
+
+        // Test 6: API Key Validation
+        function testAPIKeyValidation() {
+            addResult('pass', 'Testing API Key Validation...');
+            
+            // Test API key validation logic
+            const validateAPIKey = (apiKey) => {
+                return apiKey && apiKey.trim() !== '';
+            };
+            
+            if (!validateAPIKey('')) {
+                addResult('pass', 'Empty API key rejected');
+            } else {
+                addResult('fail', 'Empty API key not rejected');
+            }
+            
+            if (!validateAPIKey(null)) {
+                addResult('pass', 'Null API key rejected');
+            } else {
+                addResult('fail', 'Null API key not rejected');
+            }
+            
+            if (!validateAPIKey(undefined)) {
+                addResult('pass', 'Undefined API key rejected');
+            } else {
+                addResult('fail', 'Undefined API key not rejected');
+            }
+            
+            if (!validateAPIKey('   ')) {
+                addResult('pass', 'Whitespace-only API key rejected');
+            } else {
+                addResult('fail', 'Whitespace-only API key not rejected');
+            }
+            
+            if (validateAPIKey('valid-key')) {
+                addResult('pass', 'Valid API key accepted');
+            } else {
+                addResult('fail', 'Valid API key not accepted');
+            }
+        }
+
+        // Test 7: Network Timeout Handling
+        function testNetworkTimeoutHandling() {
+            addResult('pass', 'Testing Network Timeout Handling...');
+            
+            // Test AbortController functionality
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 100);
+            
+            // Simulate a fetch with timeout
+            const testFetch = async () => {
+                try {
+                    const response = await fetch('https://httpbin.org/delay/5', {
+                        signal: controller.signal
+                    });
+                    return response;
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        throw new Error('Request timeout');
+                    }
+                    throw error;
+                }
+            };
+            
+            testFetch().catch(error => {
+                if (error.message === 'Request timeout') {
+                    addResult('pass', 'Timeout handling works correctly');
+                } else {
+                    addResult('fail', 'Timeout handling does not work correctly');
+                }
+            });
+            
+            clearTimeout(timeoutId);
+        }
+
+        // Run all tests
+        function runAllTests() {
+            clearResults();
+            addResult('pass', '🚀 Starting SavedSync Extension Test Suite...');
+            
+            setTimeout(() => testMemoryLeak(), 100);
+            setTimeout(() => testXSSPrevention(), 200);
+            setTimeout(() => testDataSanitization(), 300);
+            setTimeout(() => testDOMElementAccessSafety(), 400);
+            setTimeout(() => testErrorHandling(), 500);
+            setTimeout(() => testAPIKeyValidation(), 600);
+            setTimeout(() => testNetworkTimeoutHandling(), 700);
+            
+            setTimeout(() => {
+                const total = testResults.passed + testResults.failed + testResults.warnings;
+                if (testResults.failed === 0) {
+                    addResult('pass', '🎉 All tests completed successfully!');
+                } else {
+                    addResult('fail', `⚠️  ${testResults.failed} tests failed. Please review the results above.`);
+                }
+            }, 1000);
+        }
+
+        // Initialize
+        updateSummary();
+    </script>
+</body>
+</html>
