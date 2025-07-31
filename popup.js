@@ -116,29 +116,47 @@ function updateStatus(stats) {
   const statusDiv = document.getElementById('syncStatus');
   const statusIndicator = document.getElementById('statusIndicator');
   const statusText = document.getElementById('statusText');
+  const syncButton = document.getElementById('syncButton');
   
-  if (stats.totalItems > 0) {
-    statusIndicator.className = 'status-indicator active';
-    statusText.textContent = stats.lastSync ? 
-      `Last sync: ${formatDate(stats.lastSync)}` : 
-      'Ready to sync';
-    statusDiv.className = 'sync-status success';
-  } else {
-    statusIndicator.className = 'status-indicator inactive';
-    statusText.textContent = 'No items to sync';
-    statusDiv.className = 'sync-status';
-  }
+  // Check if sync is configured
+  chrome.storage.local.get(['syncSettings'], (result) => {
+    const syncSettings = result.syncSettings || {};
+    
+    if (stats.totalItems > 0) {
+      if (syncSettings.enabled && syncSettings.serverUrl && syncSettings.apiKey) {
+        statusIndicator.className = 'status-indicator active';
+        statusText.textContent = stats.lastSync ? 
+          `Last sync: ${formatDate(stats.lastSync)}` : 
+          'Ready to sync';
+        statusDiv.className = 'sync-status success';
+        syncButton.disabled = false;
+      } else {
+        statusIndicator.className = 'status-indicator inactive';
+        statusText.textContent = 'Sync not configured';
+        statusDiv.className = 'sync-status';
+        syncButton.disabled = true;
+      }
+    } else {
+      statusIndicator.className = 'status-indicator inactive';
+      statusText.textContent = 'No items to sync';
+      statusDiv.className = 'sync-status';
+      syncButton.disabled = true;
+    }
+  });
 }
 
 async function syncNow() {
   const button = document.getElementById('syncButton');
   const statusText = document.getElementById('statusText');
+  const statusIndicator = document.getElementById('statusIndicator');
   const originalText = button.textContent;
   
   try {
     button.disabled = true;
     button.textContent = 'Syncing...';
     statusText.textContent = 'Syncing to server...';
+    statusIndicator.className = 'status-indicator active';
+    document.getElementById('syncStatus').className = 'sync-status';
     
     // Trigger sync
     const result = await new Promise((resolve) => {
@@ -147,9 +165,11 @@ async function syncNow() {
     
     if (result.success) {
       statusText.textContent = 'Sync completed successfully!';
+      statusIndicator.className = 'status-indicator active';
       document.getElementById('syncStatus').className = 'sync-status success';
     } else {
       statusText.textContent = `Sync failed: ${result.message}`;
+      statusIndicator.className = 'status-indicator inactive';
       document.getElementById('syncStatus').className = 'sync-status error';
     }
     
@@ -158,16 +178,17 @@ async function syncNow() {
     
   } catch (error) {
     console.error('Sync error:', error);
-    statusText.textContent = 'Sync failed';
+    statusText.textContent = `Sync failed: ${error.message || 'Unknown error'}`;
+    statusIndicator.className = 'status-indicator inactive';
     document.getElementById('syncStatus').className = 'sync-status error';
   } finally {
     button.disabled = false;
     button.textContent = originalText;
     
-    // Reset status text after 3 seconds
+    // Reset status text after 5 seconds
     setTimeout(() => {
       loadStats();
-    }, 3000);
+    }, 5000);
   }
 }
 
@@ -193,6 +214,8 @@ function openSettings() {
       
       <div class="info">
         <p><strong>Mobile App Integration:</strong> Configure these settings to sync your saved items with the mobile app.</p>
+        <p><strong>Server URL Format:</strong> https://your-server.com (without trailing slash)</p>
+        <p><strong>API Key:</strong> Get this from your mobile app settings</p>
       </div>
       
       <form id="settingsForm">
@@ -213,6 +236,7 @@ function openSettings() {
         </div>
         
         <button type="submit">Save Settings</button>
+        <button type="button" id="testConnection" style="margin-left: 10px; background: #28a745;">Test Connection</button>
       </form>
       
       <script>
@@ -227,16 +251,94 @@ function openSettings() {
         // Save settings
         document.getElementById('settingsForm').addEventListener('submit', (e) => {
           e.preventDefault();
+          
+          const serverUrl = document.getElementById('serverUrl').value.trim();
+          const apiKey = document.getElementById('apiKey').value.trim();
+          const enabled = document.getElementById('enableSync').checked;
+          
+          // Validate settings
+          if (enabled) {
+            if (!serverUrl) {
+              alert('Please enter a server URL when enabling sync.');
+              return;
+            }
+            
+            if (!apiKey) {
+              alert('Please enter an API key when enabling sync.');
+              return;
+            }
+            
+            // Validate URL format
+            try {
+              new URL(serverUrl);
+            } catch (error) {
+              alert('Please enter a valid server URL (e.g., https://your-server.com)');
+              return;
+            }
+          }
+          
           const settings = {
-            serverUrl: document.getElementById('serverUrl').value,
-            apiKey: document.getElementById('apiKey').value,
-            enabled: document.getElementById('enableSync').checked
+            serverUrl: serverUrl,
+            apiKey: apiKey,
+            enabled: enabled
           };
           
           chrome.storage.local.set({ syncSettings: settings }, () => {
-            alert('Settings saved!');
+            alert('Settings saved successfully!');
+            
+            // Test the connection if sync is enabled
+            if (enabled) {
+              testConnection(serverUrl, apiKey);
+            }
           });
         });
+        
+        // Test connection button
+        document.getElementById('testConnection').addEventListener('click', async () => {
+          const serverUrl = document.getElementById('serverUrl').value.trim();
+          const apiKey = document.getElementById('apiKey').value.trim();
+          
+          if (!serverUrl || !apiKey) {
+            alert('Please enter both server URL and API key before testing.');
+            return;
+          }
+          
+          const button = document.getElementById('testConnection');
+          const originalText = button.textContent;
+          button.textContent = 'Testing...';
+          button.disabled = true;
+          
+          try {
+            await testConnection(serverUrl, apiKey);
+          } finally {
+            button.textContent = originalText;
+            button.disabled = false;
+          }
+        });
+        
+        // Test connection function
+        async function testConnection(serverUrl, apiKey) {
+          try {
+            const testUrl = serverUrl.endsWith('/') 
+              ? `${serverUrl}api/sync/test`
+              : `${serverUrl}/api/sync/test`;
+            
+            const response = await fetch(testUrl, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`
+              }
+            });
+            
+            if (response.ok) {
+              alert('Connection test successful! Your settings are working correctly.');
+            } else {
+              alert(`Connection test failed (${response.status}). Please check your server URL and API key.`);
+            }
+          } catch (error) {
+            alert(`Connection test failed: ${error.message}. Please check your server URL and API key.`);
+          }
+        }
       </script>
     </body>
     </html>

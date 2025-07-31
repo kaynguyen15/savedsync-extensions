@@ -232,7 +232,14 @@ async function syncToServer() {
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
     
     try {
-      const response = await fetch(`https://savedsync-backend.onrender.com/api/sync/bulk`, {
+      // Use the configured server URL instead of hardcoded URL
+      const syncUrl = syncSettings.serverUrl.endsWith('/') 
+        ? `${syncSettings.serverUrl}api/sync/bulk`
+        : `${syncSettings.serverUrl}/api/sync/bulk`;
+      
+      console.log('Attempting to sync to:', syncUrl);
+      
+      const response = await fetch(syncUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -249,16 +256,44 @@ async function syncToServer() {
       
       if (response.ok) {
         console.log('Successfully synced to server');
+        
+        // Update last sync timestamp
+        const currentStats = await chrome.storage.local.get(['stats']);
+        const updatedStats = {
+          ...currentStats.stats,
+          lastSync: new Date().toISOString()
+        };
+        await chrome.storage.local.set({ stats: updatedStats });
+        
         return { success: true, message: 'Synced successfully' };
       } else {
         const errorText = await response.text().catch(() => 'Unknown error');
-        throw new Error(`Server responded with ${response.status}: ${errorText}`);
+        console.error('Server error response:', response.status, errorText);
+        
+        // Handle specific error codes
+        if (response.status === 401) {
+          throw new Error('Invalid API key. Please check your settings.');
+        } else if (response.status === 403) {
+          throw new Error('Access denied. Please check your API key permissions.');
+        } else if (response.status === 404) {
+          throw new Error('Sync endpoint not found. Please check your server URL.');
+        } else if (response.status >= 500) {
+          throw new Error('Server error. Please try again later.');
+        } else {
+          throw new Error(`Server error (${response.status}): ${errorText}`);
+        }
       }
       
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError.name === 'AbortError') {
-        throw new Error('Request timeout');
+        throw new Error('Request timeout - server took too long to respond');
+      } else if (fetchError.name === 'TypeError' && fetchError.message.includes('fetch')) {
+        throw new Error('Network error - please check your internet connection');
+      } else if (fetchError.message.includes('CORS')) {
+        throw new Error('CORS error - server does not allow requests from this extension');
+      } else if (fetchError.message.includes('Failed to fetch')) {
+        throw new Error('Connection failed - please check your server URL and internet connection');
       }
       throw fetchError;
     }
@@ -269,12 +304,22 @@ async function syncToServer() {
   }
 }
 
-// Periodic sync (every 5 minutes if items exist)
+// Periodic sync (every 5 minutes if items exist and sync is configured)
 setInterval(async () => {
-  const result = await chrome.storage.local.get(['savedItems']);
-  const savedItems = result.savedItems || [];
-  
-  if (savedItems.length > 0) {
-    await syncToServer();
+  try {
+    const result = await chrome.storage.local.get(['savedItems', 'syncSettings']);
+    const savedItems = result.savedItems || [];
+    const syncSettings = result.syncSettings || {};
+    
+    // Only sync if items exist and sync is properly configured
+    if (savedItems.length > 0 && 
+        syncSettings.enabled && 
+        syncSettings.serverUrl && 
+        syncSettings.apiKey) {
+      console.log('Running periodic sync...');
+      await syncToServer();
+    }
+  } catch (error) {
+    console.error('Periodic sync error:', error);
   }
 }, 5 * 60 * 1000); // 5 minutes
