@@ -4,6 +4,8 @@ class SavedItemDetector {
   constructor() {
     this.platform = this.detectPlatform();
     this.processedItems = new Set(); // Track processed items
+    this.observer = null; // Store observer reference
+    this.scanInterval = null; // Store interval reference
     console.log(`SavedSync: Initialized on ${this.platform}`);
     this.init();
   }
@@ -33,13 +35,13 @@ class SavedItemDetector {
     this.observeDOM();
     
     // Periodic scan for missed items
-    setInterval(() => {
+    this.scanInterval = setInterval(() => {
       this.scanForSavedItems();
     }, 10000); // Every 10 seconds
   }
   
   observeDOM() {
-    const observer = new MutationObserver((mutations) => {
+    this.observer = new MutationObserver((mutations) => {
       let shouldScan = false;
       
       mutations.forEach((mutation) => {
@@ -71,12 +73,28 @@ class SavedItemDetector {
       }
     });
     
-    observer.observe(document.body, {
+    this.observer.observe(document.body, {
       childList: true,
       subtree: true,
       attributes: true,
       attributeFilter: ['aria-label', 'aria-pressed', 'class']
     });
+  }
+  
+  // Cleanup method to prevent memory leaks
+  cleanup() {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+    
+    if (this.scanInterval) {
+      clearInterval(this.scanInterval);
+      this.scanInterval = null;
+    }
+    
+    this.processedItems.clear();
+    console.log(`SavedSync: Cleaned up detector for ${this.platform}`);
   }
   
   scanForSavedItems() {
@@ -143,38 +161,85 @@ class SavedItemDetector {
   
   extractInstagramPost(element) {
     try {
-      // Find author
-      const authorLink = element.querySelector('header a[role="link"]');
-      const author = authorLink?.textContent?.trim() || '@unknown';
-      
-      // Find content
-      const contentSpans = element.querySelectorAll('span');
-      let content = '';
-      for (let span of contentSpans) {
-        const text = span.textContent?.trim();
-        if (text && text.length > 20 && !text.includes('•') && !text.includes('Follow')) {
-          content = text;
-          break;
-        }
+      if (!element) {
+        console.warn('Instagram: No element provided for extraction');
+        return;
       }
       
-      // Find media
-      const img = element.querySelector('img[src*="instagram"]');
-      const video = element.querySelector('video');
+      // Find author with multiple fallback selectors
+      let author = '@unknown';
+      try {
+        const authorSelectors = [
+          'header a[role="link"]',
+          'a[role="link"] span',
+          'h2 a',
+          'div[role="button"] span'
+        ];
+        
+        for (const selector of authorSelectors) {
+          const authorElement = element.querySelector(selector);
+          if (authorElement?.textContent?.trim()) {
+            author = authorElement.textContent.trim();
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn('Instagram: Error finding author:', e);
+      }
       
-      // Get engagement data
-      const likeButton = element.querySelector('[aria-label*="like"]');
-      const likesText = likeButton?.getAttribute('aria-label') || '';
+      // Find content with fallback selectors
+      let content = '';
+      try {
+        const contentSelectors = [
+          'div[data-testid="post-content"] span',
+          'article span',
+          'div[role="button"] + div span'
+        ];
+        
+        for (const selector of contentSelectors) {
+          const contentSpans = element.querySelectorAll(selector);
+          for (let span of contentSpans) {
+            const text = span.textContent?.trim();
+            if (text && text.length > 20 && !text.includes('•') && !text.includes('Follow')) {
+              content = text;
+              break;
+            }
+          }
+          if (content) break;
+        }
+      } catch (e) {
+        console.warn('Instagram: Error finding content:', e);
+      }
+      
+      // Find media with fallback selectors
+      let mediaUrl = null;
+      try {
+        const img = element.querySelector('img[src*="instagram"], img[src*="cdninstagram"]');
+        const video = element.querySelector('video');
+        mediaUrl = img?.src || video?.poster || null;
+      } catch (e) {
+        console.warn('Instagram: Error finding media:', e);
+      }
+      
+      // Get engagement data safely
+      let likes = '0';
+      try {
+        const likeButton = element.querySelector('[aria-label*="like"], [aria-label*="Like"]');
+        const likesText = likeButton?.getAttribute('aria-label') || '';
+        likes = this.extractNumber(likesText);
+      } catch (e) {
+        console.warn('Instagram: Error getting engagement data:', e);
+      }
       
       const item = {
         platform: 'instagram',
-        type: video ? 'video' : 'post',
+        type: element.querySelector('video') ? 'video' : 'post',
         author: author,
-        content: content,
-        image: img?.src || video?.poster || null,
+        content: content || 'No caption available',
+        image: mediaUrl,
         url: window.location.href,
         engagement: {
-          likes: this.extractNumber(likesText)
+          likes: likes
         }
       };
       
@@ -215,23 +280,68 @@ class SavedItemDetector {
   
   extractTikTokVideo(element) {
     try {
-      // Find author
-      const authorElement = element.querySelector('[data-e2e*="username"], a[href*="/@"]');
-      const author = authorElement?.textContent?.trim() || '@unknown';
+      if (!element) {
+        console.warn('TikTok: No element provided for extraction');
+        return;
+      }
       
-      // Find description
-      const descElement = element.querySelector('[data-e2e*="desc"], [data-e2e*="browse-video-desc"]');
-      const content = descElement?.textContent?.trim() || '';
+      // Find author with fallback selectors
+      let author = '@unknown';
+      try {
+        const authorSelectors = [
+          '[data-e2e*="username"]',
+          'a[href*="/@"]',
+          '[data-e2e="browse-username"]',
+          'h3 a[href*="/@"]'
+        ];
+        
+        for (const selector of authorSelectors) {
+          const authorElement = element.querySelector(selector);
+          if (authorElement?.textContent?.trim()) {
+            author = authorElement.textContent.trim();
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn('TikTok: Error finding author:', e);
+      }
       
-      // Find video thumbnail
-      const video = element.querySelector('video');
-      const thumbnail = video?.poster || null;
+      // Find description with fallback selectors
+      let content = '';
+      try {
+        const descSelectors = [
+          '[data-e2e*="desc"]',
+          '[data-e2e*="browse-video-desc"]',
+          '[data-e2e="video-desc"]',
+          'div[data-e2e*="video"] h1'
+        ];
+        
+        for (const selector of descSelectors) {
+          const descElement = element.querySelector(selector);
+          if (descElement?.textContent?.trim()) {
+            content = descElement.textContent.trim();
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn('TikTok: Error finding content:', e);
+      }
+      
+      // Find video thumbnail safely
+      let thumbnail = null;
+      try {
+        const video = element.querySelector('video');
+        const img = element.querySelector('img[src*="tiktok"]');
+        thumbnail = video?.poster || img?.src || null;
+      } catch (e) {
+        console.warn('TikTok: Error finding thumbnail:', e);
+      }
       
       const item = {
         platform: 'tiktok',
         type: 'video',
         author: author,
-        content: content,
+        content: content || 'No description available',
         thumbnail: thumbnail,
         url: window.location.href
       };
@@ -367,23 +477,79 @@ class SavedItemDetector {
   
   extractTwitterTweet(element) {
     try {
-      // Find author
-      const authorElement = element.querySelector('[data-testid="User-Name"] span');
-      const author = authorElement?.textContent?.trim() || '@unknown';
+      if (!element) {
+        console.warn('Twitter: No element provided for extraction');
+        return;
+      }
       
-      // Find content
-      const contentElement = element.querySelector('[data-testid="tweetText"]');
-      const content = contentElement?.textContent?.trim() || '';
+      // Find author with fallback selectors
+      let author = '@unknown';
+      try {
+        const authorSelectors = [
+          '[data-testid="User-Name"] span',
+          '[data-testid="User-Names"] span',
+          'div[dir="ltr"] span',
+          'article span[dir="ltr"]'
+        ];
+        
+        for (const selector of authorSelectors) {
+          const authorElement = element.querySelector(selector);
+          if (authorElement?.textContent?.trim() && !authorElement.textContent.includes('@')) {
+            author = authorElement.textContent.trim();
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn('Twitter: Error finding author:', e);
+      }
       
-      // Find image
-      const img = element.querySelector('[data-testid="tweetPhoto"] img');
+      // Find content with fallback selectors
+      let content = '';
+      try {
+        const contentSelectors = [
+          '[data-testid="tweetText"]',
+          '[data-testid="tweet-text"]',
+          'div[lang] span',
+          'article div[dir="auto"]'
+        ];
+        
+        for (const selector of contentSelectors) {
+          const contentElement = element.querySelector(selector);
+          if (contentElement?.textContent?.trim()) {
+            content = contentElement.textContent.trim();
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn('Twitter: Error finding content:', e);
+      }
+      
+      // Find image safely
+      let imageUrl = null;
+      try {
+        const imgSelectors = [
+          '[data-testid="tweetPhoto"] img',
+          '[data-testid="tweet-photo"] img',
+          'article img[src*="pbs.twimg.com"]'
+        ];
+        
+        for (const selector of imgSelectors) {
+          const img = element.querySelector(selector);
+          if (img?.src) {
+            imageUrl = img.src;
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn('Twitter: Error finding image:', e);
+      }
       
       const item = {
         platform: 'twitter',
         type: 'tweet',
         author: author,
-        content: content,
-        image: img?.src || null,
+        content: content || 'No content available',
+        image: imageUrl,
         url: window.location.href
       };
       
@@ -418,13 +584,23 @@ class SavedItemDetector {
   }
 }
 
+// Global detector instance to prevent memory leaks
+let detectorInstance = null;
+
+function initializeDetector() {
+  // Clean up existing instance
+  if (detectorInstance && detectorInstance.cleanup) {
+    detectorInstance.cleanup();
+  }
+  
+  detectorInstance = new SavedItemDetector();
+}
+
 // Initialize detector when page loads
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    new SavedItemDetector();
-  });
+  document.addEventListener('DOMContentLoaded', initializeDetector);
 } else {
-  new SavedItemDetector();
+  initializeDetector();
 }
 
 // Also initialize on navigation (for SPAs)
@@ -432,8 +608,6 @@ let currentUrl = window.location.href;
 setInterval(() => {
   if (window.location.href !== currentUrl) {
     currentUrl = window.location.href;
-    setTimeout(() => {
-      new SavedItemDetector();
-    }, 2000);
+    setTimeout(initializeDetector, 2000);
   }
 }, 1000);

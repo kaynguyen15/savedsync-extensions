@@ -5,7 +5,9 @@
   "description": "Automatically collect your saved items from social media platforms",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "downloads",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.instagram.com/*",

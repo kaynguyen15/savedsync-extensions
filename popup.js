@@ -20,17 +20,32 @@ async function loadStats() {
   try {
     console.log('Loading stats...');
     
-    // Get stats from background script
-    const stats = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'GET_STATS' }, resolve);
+    // Get stats from background script with proper error handling
+    const stats = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'GET_STATS' }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response);
+      });
     });
     
     console.log('Stats received:', stats);
     
-    // Update UI
-    document.getElementById('totalItems').textContent = stats.totalItems || 0;
-    document.getElementById('todayItems').textContent = stats.todayItems || 0;
-    document.getElementById('platforms').textContent = stats.platforms || 0;
+    // Ensure stats is valid before updating UI
+    if (!stats || typeof stats !== 'object') {
+      throw new Error('Invalid stats response');
+    }
+    
+    // Update UI with null checks
+    const totalElement = document.getElementById('totalItems');
+    const todayElement = document.getElementById('todayItems');
+    const platformsElement = document.getElementById('platforms');
+    
+    if (totalElement) totalElement.textContent = stats.totalItems || 0;
+    if (todayElement) todayElement.textContent = stats.todayItems || 0;
+    if (platformsElement) platformsElement.textContent = stats.platforms || 0;
     
     // Update platform list
     updatePlatformList(stats.platformCounts || {});
@@ -117,8 +132,14 @@ async function syncNow() {
     statusText.textContent = 'Syncing to server...';
     
     // Trigger sync
-    const result = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'SYNC_NOW' }, resolve);
+    const result = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'SYNC_NOW' }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response);
+      });
     });
     
     if (result.success) {

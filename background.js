@@ -42,55 +42,63 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Storage queue to prevent concurrent writes
+let storageQueue = Promise.resolve();
+
 // Handle detected saved item
 async function handleSavedItem(item) {
-  try {
-    console.log('Processing saved item:', item);
-    
-    // Get existing saved items
-    const result = await chrome.storage.local.get(['savedItems']);
-    const savedItems = result.savedItems || [];
-    
-    // Check if item already exists (prevent duplicates)
-    const exists = savedItems.some(existing => 
-      existing.platform === item.platform && 
-      existing.url === item.url &&
-      existing.content === item.content
-    );
-    
-    if (!exists) {
-      // Add timestamp and unique ID
-      item.id = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-      item.savedDate = new Date().toISOString();
-      item.detectedAt = new Date().toISOString();
+  // Queue this operation to prevent concurrent storage writes
+  storageQueue = storageQueue.then(async () => {
+    try {
+      console.log('Processing saved item:', item);
       
-      savedItems.unshift(item); // Add to beginning
+      // Get existing saved items
+      const result = await chrome.storage.local.get(['savedItems']);
+      const savedItems = result.savedItems || [];
       
-      // Keep only last 1000 items to prevent storage bloat
-      if (savedItems.length > 1000) {
-        savedItems.splice(1000);
+      // Check if item already exists (prevent duplicates)
+      const exists = savedItems.some(existing => 
+        existing.platform === item.platform && 
+        existing.url === item.url &&
+        existing.content === item.content
+      );
+      
+      if (!exists) {
+        // Add timestamp and unique ID
+        item.id = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        item.savedDate = new Date().toISOString();
+        item.detectedAt = new Date().toISOString();
+        
+        savedItems.unshift(item); // Add to beginning
+        
+        // Keep only last 1000 items to prevent storage bloat
+        if (savedItems.length > 1000) {
+          savedItems.splice(1000);
+        }
+        
+        await chrome.storage.local.set({ savedItems });
+        
+        // Update stats
+        await updateStats();
+        
+        // Try to sync to server if configured
+        await syncToServer();
+        
+        console.log('Saved item stored:', item.platform, item.author);
+        
+        // Show notification badge
+        chrome.action.setBadgeText({ text: savedItems.length.toString() });
+        chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+        
+      } else {
+        console.log('Item already exists, skipping');
       }
-      
-      await chrome.storage.local.set({ savedItems });
-      
-      // Update stats
-      await updateStats();
-      
-      // Try to sync to server if configured
-      await syncToServer();
-      
-      console.log('Saved item stored:', item.platform, item.author);
-      
-      // Show notification badge
-      chrome.action.setBadgeText({ text: savedItems.length.toString() });
-      chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
-      
-    } else {
-      console.log('Item already exists, skipping');
+    } catch (error) {
+      console.error('Error storing saved item:', error);
     }
-  } catch (error) {
-    console.error('Error storing saved item:', error);
-  }
+  });
+  
+  return storageQueue;
 }
 
 // Update statistics
@@ -159,7 +167,7 @@ async function syncToServer() {
     }
     
     // Send to server
-    const response = await fetch(`https://savedsync-backend.onrender.com/api/sync/bulk`, {
+    const response = await fetch(`${syncSettings.serverUrl}/sync/bulk`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
