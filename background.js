@@ -96,8 +96,9 @@ async function handleSavedItem(item) {
 // Update statistics
 async function updateStats() {
   try {
-    const result = await chrome.storage.local.get(['savedItems']);
+    const result = await chrome.storage.local.get(['savedItems', 'stats']);
     const savedItems = result.savedItems || [];
+    const existingStats = result.stats || {};
     
     const today = new Date().toDateString();
     const todayItems = savedItems.filter(item => 
@@ -107,8 +108,8 @@ async function updateStats() {
     const stats = {
       totalItems: savedItems.length,
       todayItems: todayItems,
-      lastSync: new Date().toISOString(),
-      platforms: [...new Set(savedItems.map(item => item.platform))].length
+      platforms: [...new Set(savedItems.map(item => item.platform))].length,
+      lastSync: existingStats.lastSync || null
     };
     
     await chrome.storage.local.set({ stats });
@@ -159,7 +160,8 @@ async function syncToServer() {
     }
     
     // Send to server
-    const response = await fetch(`https://savedsync-backend.onrender.com/api/sync/bulk`, {
+    const endpoint = `${syncSettings.serverUrl.replace(/\/$/, '')}/sync/bulk`;
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -173,6 +175,11 @@ async function syncToServer() {
     
     if (response.ok) {
       console.log('Successfully synced to server');
+      // Record last successful sync time in stats
+      const statsResult = await chrome.storage.local.get(['stats']);
+      const stats = statsResult.stats || {};
+      stats.lastSync = new Date().toISOString();
+      await chrome.storage.local.set({ stats });
       return { success: true, message: 'Synced successfully' };
     } else {
       throw new Error(`Server responded with ${response.status}`);
