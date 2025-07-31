@@ -2,10 +2,24 @@
 
 class SavedItemDetector {
   constructor() {
+    // Prevent multiple instances
+    if (window.savedSyncDetector) {
+      console.log('SavedSync: Detector already exists, skipping initialization');
+      return;
+    }
+    
     this.platform = this.detectPlatform();
     this.processedItems = new Set(); // Track processed items
+    this.observer = null;
+    this.scanInterval = null;
+    this.navigationInterval = null;
+    this.isDestroyed = false;
+    
     console.log(`SavedSync: Initialized on ${this.platform}`);
     this.init();
+    
+    // Store instance globally to prevent duplicates
+    window.savedSyncDetector = this;
   }
   
   detectPlatform() {
@@ -25,79 +39,99 @@ class SavedItemDetector {
     }
     
     // Initial scan after page loads
-    setTimeout(() => {
-      this.scanForSavedItems();
+    this.initialScanTimeout = setTimeout(() => {
+      if (!this.isDestroyed) {
+        this.scanForSavedItems();
+      }
     }, 3000);
     
     // Monitor for changes (new posts loading, saves happening)
     this.observeDOM();
     
     // Periodic scan for missed items
-    setInterval(() => {
-      this.scanForSavedItems();
+    this.scanInterval = setInterval(() => {
+      if (!this.isDestroyed) {
+        this.scanForSavedItems();
+      }
     }, 10000); // Every 10 seconds
   }
   
   observeDOM() {
-    const observer = new MutationObserver((mutations) => {
-      let shouldScan = false;
-      
-      mutations.forEach((mutation) => {
-        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-          // Check if significant content was added
-          for (let node of mutation.addedNodes) {
-            if (node.nodeType === 1 && node.children && node.children.length > 0) {
-              shouldScan = true;
-              break;
+    try {
+      this.observer = new MutationObserver((mutations) => {
+        if (this.isDestroyed) return;
+        
+        let shouldScan = false;
+        
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            // Check if significant content was added
+            for (let node of mutation.addedNodes) {
+              if (node.nodeType === 1 && node.children && node.children.length > 0) {
+                shouldScan = true;
+                break;
+              }
             }
           }
-        }
-        
-        if (mutation.type === 'attributes') {
-          // Check for attribute changes that might indicate saves
-          const target = mutation.target;
-          if (target.getAttribute && (
-            target.getAttribute('aria-label')?.includes('Save') ||
-            target.getAttribute('aria-label')?.includes('Remove') ||
-            target.getAttribute('aria-pressed') === 'true'
-          )) {
-            shouldScan = true;
+          
+          if (mutation.type === 'attributes') {
+            // Check for attribute changes that might indicate saves
+            const target = mutation.target;
+            if (target.getAttribute && (
+              target.getAttribute('aria-label')?.includes('Save') ||
+              target.getAttribute('aria-label')?.includes('Remove') ||
+              target.getAttribute('aria-pressed') === 'true'
+            )) {
+              shouldScan = true;
+            }
           }
+        });
+        
+        if (shouldScan) {
+          setTimeout(() => {
+            if (!this.isDestroyed) {
+              this.scanForSavedItems();
+            }
+          }, 1000);
         }
       });
       
-      if (shouldScan) {
-        setTimeout(() => this.scanForSavedItems(), 1000);
-      }
-    });
-    
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['aria-label', 'aria-pressed', 'class']
-    });
+      this.observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['aria-label', 'aria-pressed', 'class']
+      });
+    } catch (error) {
+      console.error('SavedSync: Error setting up DOM observer:', error);
+    }
   }
   
   scanForSavedItems() {
+    if (this.isDestroyed) return;
+    
     console.log(`SavedSync: Scanning for saved items on ${this.platform}`);
     
-    switch (this.platform) {
-      case 'instagram':
-        this.detectInstagramSaved();
-        break;
-      case 'facebook':
-        this.detectFacebookSaved();
-        break;
-      case 'tiktok':
-        this.detectTikTokSaved();
-        break;
-      case 'threads':
-        this.detectThreadsSaved();
-        break;
-      case 'twitter':
-        this.detectTwitterSaved();
-        break;
+    try {
+      switch (this.platform) {
+        case 'instagram':
+          this.detectInstagramSaved();
+          break;
+        case 'facebook':
+          this.detectFacebookSaved();
+          break;
+        case 'tiktok':
+          this.detectTikTokSaved();
+          break;
+        case 'threads':
+          this.detectThreadsSaved();
+          break;
+        case 'twitter':
+          this.detectTwitterSaved();
+          break;
+      }
+    } catch (error) {
+      console.error('SavedSync: Error during scan:', error);
     }
   }
   
@@ -395,45 +429,111 @@ class SavedItemDetector {
   
   // Helper methods
   getElementIdentifier(element) {
-    // Create a unique identifier for an element
-    const rect = element.getBoundingClientRect();
-    const content = element.textContent?.substring(0, 50) || '';
-    return `${this.platform}-${rect.top}-${rect.left}-${content.replace(/\s+/g, '')}`;
+    try {
+      // Create a unique identifier for an element
+      const rect = element.getBoundingClientRect();
+      const content = element.textContent?.substring(0, 50) || '';
+      return `${this.platform}-${rect.top}-${rect.left}-${content.replace(/\s+/g, '')}`;
+    } catch (error) {
+      console.error('SavedSync: Error creating element identifier:', error);
+      return `${this.platform}-${Date.now()}-${Math.random()}`;
+    }
   }
   
   extractNumber(text) {
-    const match = text.match(/[\d,]+/);
-    return match ? match[0] : '0';
+    try {
+      const match = text.match(/[\d,]+/);
+      return match ? match[0] : '0';
+    } catch (error) {
+      console.error('SavedSync: Error extracting number:', error);
+      return '0';
+    }
   }
   
   sendToBackground(item) {
+    if (this.isDestroyed) return;
+    
     console.log('SavedSync: Detected saved item:', item);
     
-    chrome.runtime.sendMessage({
-      type: 'SAVED_ITEM_DETECTED',
-      data: item
-    }).catch(error => {
-      console.error('Error sending to background:', error);
-    });
+    try {
+      chrome.runtime.sendMessage({
+        type: 'SAVED_ITEM_DETECTED',
+        data: item
+      }).catch(error => {
+        console.error('SavedSync: Error sending to background:', error);
+      });
+    } catch (error) {
+      console.error('SavedSync: Error sending message:', error);
+    }
+  }
+  
+  // Cleanup method to prevent memory leaks
+  destroy() {
+    this.isDestroyed = true;
+    
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+    
+    if (this.scanInterval) {
+      clearInterval(this.scanInterval);
+      this.scanInterval = null;
+    }
+    
+    if (this.navigationInterval) {
+      clearInterval(this.navigationInterval);
+      this.navigationInterval = null;
+    }
+    
+    if (this.initialScanTimeout) {
+      clearTimeout(this.initialScanTimeout);
+      this.initialScanTimeout = null;
+    }
+    
+    // Clear processed items to free memory
+    this.processedItems.clear();
+    
+    console.log('SavedSync: Detector destroyed');
   }
 }
 
 // Initialize detector when page loads
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    new SavedItemDetector();
-  });
-} else {
+function initializeDetector() {
+  // Clean up existing detector if any
+  if (window.savedSyncDetector) {
+    window.savedSyncDetector.destroy();
+  }
+  
   new SavedItemDetector();
 }
 
-// Also initialize on navigation (for SPAs)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeDetector);
+} else {
+  initializeDetector();
+}
+
+// Also initialize on navigation (for SPAs) with cleanup
 let currentUrl = window.location.href;
-setInterval(() => {
+const navigationInterval = setInterval(() => {
   if (window.location.href !== currentUrl) {
     currentUrl = window.location.href;
-    setTimeout(() => {
-      new SavedItemDetector();
-    }, 2000);
+    
+    // Clean up existing detector
+    if (window.savedSyncDetector) {
+      window.savedSyncDetector.destroy();
+    }
+    
+    // Initialize new detector after navigation
+    setTimeout(initializeDetector, 2000);
   }
 }, 1000);
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  if (window.savedSyncDetector) {
+    window.savedSyncDetector.destroy();
+  }
+  clearInterval(navigationInterval);
+});

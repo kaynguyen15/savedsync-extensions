@@ -26,19 +26,55 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Background received message:', message.type);
   
-  if (message.type === 'SAVED_ITEM_DETECTED') {
-    handleSavedItem(message.data);
-    sendResponse({ success: true });
-  }
-  
-  if (message.type === 'GET_STATS') {
-    getStats().then(stats => sendResponse(stats));
-    return true; // Keep channel open for async response
-  }
-  
-  if (message.type === 'SYNC_NOW') {
-    syncToServer().then(result => sendResponse(result));
-    return true;
+  try {
+    if (message.type === 'SAVED_ITEM_DETECTED') {
+      if (!message.data || typeof message.data !== 'object') {
+        console.error('Invalid saved item data received');
+        sendResponse({ success: false, error: 'Invalid data format' });
+        return;
+      }
+      
+      handleSavedItem(message.data);
+      sendResponse({ success: true });
+    }
+    
+    else if (message.type === 'GET_STATS') {
+      getStats().then(stats => {
+        sendResponse(stats);
+      }).catch(error => {
+        console.error('Error getting stats:', error);
+        sendResponse({ 
+          totalItems: 0, 
+          todayItems: 0, 
+          platforms: 0, 
+          platformCounts: {},
+          error: 'Failed to get stats'
+        });
+      });
+      return true; // Keep channel open for async response
+    }
+    
+    else if (message.type === 'SYNC_NOW') {
+      syncToServer().then(result => {
+        sendResponse(result);
+      }).catch(error => {
+        console.error('Error during sync:', error);
+        sendResponse({ 
+          success: false, 
+          message: 'Sync failed: ' + error.message 
+        });
+      });
+      return true;
+    }
+    
+    else {
+      console.warn('Unknown message type received:', message.type);
+      sendResponse({ success: false, error: 'Unknown message type' });
+    }
+    
+  } catch (error) {
+    console.error('Error handling message:', error);
+    sendResponse({ success: false, error: 'Internal error' });
   }
 });
 
@@ -47,24 +83,44 @@ async function handleSavedItem(item) {
   try {
     console.log('Processing saved item:', item);
     
+    // Validate and sanitize input data
+    if (!item || typeof item !== 'object') {
+      console.error('Invalid item data received');
+      return;
+    }
+    
+    // Sanitize item data
+    const sanitizedItem = {
+      platform: String(item.platform || 'unknown').substring(0, 50),
+      type: String(item.type || 'post').substring(0, 20),
+      author: String(item.author || 'Unknown').substring(0, 100),
+      content: String(item.content || '').substring(0, 1000),
+      image: item.image && typeof item.image === 'string' ? item.image.substring(0, 500) : null,
+      thumbnail: item.thumbnail && typeof item.thumbnail === 'string' ? item.thumbnail.substring(0, 500) : null,
+      url: item.url && typeof item.url === 'string' ? item.url.substring(0, 500) : null,
+      engagement: item.engagement && typeof item.engagement === 'object' ? {
+        likes: parseInt(item.engagement.likes) || 0
+      } : { likes: 0 }
+    };
+    
     // Get existing saved items
     const result = await chrome.storage.local.get(['savedItems']);
     const savedItems = result.savedItems || [];
     
     // Check if item already exists (prevent duplicates)
     const exists = savedItems.some(existing => 
-      existing.platform === item.platform && 
-      existing.url === item.url &&
-      existing.content === item.content
+      existing.platform === sanitizedItem.platform && 
+      existing.url === sanitizedItem.url &&
+      existing.content === sanitizedItem.content
     );
     
     if (!exists) {
       // Add timestamp and unique ID
-      item.id = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-      item.savedDate = new Date().toISOString();
-      item.detectedAt = new Date().toISOString();
+      sanitizedItem.id = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      sanitizedItem.savedDate = new Date().toISOString();
+      sanitizedItem.detectedAt = new Date().toISOString();
       
-      savedItems.unshift(item); // Add to beginning
+      savedItems.unshift(sanitizedItem); // Add to beginning
       
       // Keep only last 1000 items to prevent storage bloat
       if (savedItems.length > 1000) {
@@ -79,7 +135,7 @@ async function handleSavedItem(item) {
       // Try to sync to server if configured
       await syncToServer();
       
-      console.log('Saved item stored:', item.platform, item.author);
+      console.log('Saved item stored:', sanitizedItem.platform, sanitizedItem.author);
       
       // Show notification badge
       chrome.action.setBadgeText({ text: savedItems.length.toString() });
@@ -158,12 +214,30 @@ async function syncToServer() {
       return { success: false, message: 'Sync not configured' };
     }
     
+    // Validate server URL
+    let serverUrl = syncSettings.serverUrl.trim();
+    if (!serverUrl.startsWith('https://')) {
+      console.error('Invalid server URL: must use HTTPS');
+      return { success: false, message: 'Invalid server URL: must use HTTPS' };
+    }
+    
+    // Remove trailing slash if present
+    if (serverUrl.endsWith('/')) {
+      serverUrl = serverUrl.slice(0, -1);
+    }
+    
+    // Validate API key
+    if (!syncSettings.apiKey || syncSettings.apiKey.trim().length === 0) {
+      console.error('API key is required for server sync');
+      return { success: false, message: 'API key is required' };
+    }
+    
     // Send to server
-    const response = await fetch(`https://savedsync-backend.onrender.com/api/sync/bulk`, {
+    const response = await fetch(`${serverUrl}/api/sync/bulk`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${syncSettings.apiKey}`
+        'Authorization': `Bearer ${syncSettings.apiKey.trim()}`
       },
       body: JSON.stringify({ 
         items: savedItems,
@@ -175,7 +249,8 @@ async function syncToServer() {
       console.log('Successfully synced to server');
       return { success: true, message: 'Synced successfully' };
     } else {
-      throw new Error(`Server responded with ${response.status}`);
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`Server responded with ${response.status}: ${errorText}`);
     }
     
   } catch (error) {

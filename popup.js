@@ -7,13 +7,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadStats();
   
   // Set up event listeners
-  document.getElementById('syncButton').addEventListener('click', syncNow);
-  document.getElementById('settingsLink').addEventListener('click', openSettings);
-  document.getElementById('exportLink').addEventListener('click', exportData);
-  document.getElementById('helpLink').addEventListener('click', openHelp);
+  const syncButton = document.getElementById('syncButton');
+  const settingsLink = document.getElementById('settingsLink');
+  const exportLink = document.getElementById('exportLink');
+  const helpLink = document.getElementById('helpLink');
+  
+  if (syncButton) syncButton.addEventListener('click', syncNow);
+  if (settingsLink) settingsLink.addEventListener('click', openSettings);
+  if (exportLink) exportLink.addEventListener('click', exportData);
+  if (helpLink) helpLink.addEventListener('click', openHelp);
   
   // Auto-refresh stats every 30 seconds
-  setInterval(loadStats, 30000);
+  const statsInterval = setInterval(loadStats, 30000);
+  
+  // Cleanup on popup close
+  window.addEventListener('beforeunload', () => {
+    clearInterval(statsInterval);
+  });
 });
 
 async function loadStats() {
@@ -47,13 +57,22 @@ async function loadStats() {
 function updatePlatformList(platformCounts) {
   const platformList = document.getElementById('platformList');
   
+  // Clear existing content safely
+  platformList.textContent = '';
+  
   if (Object.keys(platformCounts).length === 0) {
-    platformList.innerHTML = `
-      <div class="empty-state">
-        <h3>No saved items yet</h3>
-        <p>Visit social media sites and save posts to see them here!</p>
-      </div>
-    `;
+    const emptyState = document.createElement('div');
+    emptyState.className = 'empty-state';
+    
+    const title = document.createElement('h3');
+    title.textContent = 'No saved items yet';
+    
+    const description = document.createElement('p');
+    description.textContent = 'Visit social media sites and save posts to see them here!';
+    
+    emptyState.appendChild(title);
+    emptyState.appendChild(description);
+    platformList.appendChild(emptyState);
     return;
   }
   
@@ -73,19 +92,35 @@ function updatePlatformList(platformCounts) {
     twitter: 'Twitter'
   };
   
-  platformList.innerHTML = Object.entries(platformCounts)
-    .sort(([,a], [,b]) => b - a) // Sort by count descending
-    .map(([platform, count]) => `
-      <div class="platform-item">
-        <div class="platform-info">
-          <div class="platform-icon ${platform}">
-            ${platformIcons[platform] || platform.substr(0, 2).toUpperCase()}
-          </div>
-          <span class="platform-name">${platformNames[platform] || platform}</span>
-        </div>
-        <span class="item-count">${count}</span>
-      </div>
-    `).join('');
+  // Sort platforms by count descending
+  const sortedPlatforms = Object.entries(platformCounts)
+    .sort(([,a], [,b]) => b - a);
+  
+  sortedPlatforms.forEach(([platform, count]) => {
+    const platformItem = document.createElement('div');
+    platformItem.className = 'platform-item';
+    
+    const platformInfo = document.createElement('div');
+    platformInfo.className = 'platform-info';
+    
+    const platformIcon = document.createElement('div');
+    platformIcon.className = `platform-icon ${platform}`;
+    platformIcon.textContent = platformIcons[platform] || platform.substr(0, 2).toUpperCase();
+    
+    const platformName = document.createElement('span');
+    platformName.className = 'platform-name';
+    platformName.textContent = platformNames[platform] || platform;
+    
+    const itemCount = document.createElement('span');
+    itemCount.className = 'item-count';
+    itemCount.textContent = count.toString();
+    
+    platformInfo.appendChild(platformIcon);
+    platformInfo.appendChild(platformName);
+    platformItem.appendChild(platformInfo);
+    platformItem.appendChild(itemCount);
+    platformList.appendChild(platformItem);
+  });
 }
 
 function updateStatus(stats) {
@@ -203,14 +238,35 @@ function openSettings() {
         // Save settings
         document.getElementById('settingsForm').addEventListener('submit', (e) => {
           e.preventDefault();
+          
+          const serverUrl = document.getElementById('serverUrl').value.trim();
+          const apiKey = document.getElementById('apiKey').value.trim();
+          const enabled = document.getElementById('enableSync').checked;
+          
+          // Validate server URL
+          if (enabled && (!serverUrl || !serverUrl.startsWith('https://'))) {
+            alert('Please enter a valid HTTPS server URL');
+            return;
+          }
+          
+          // Validate API key
+          if (enabled && !apiKey) {
+            alert('Please enter an API key');
+            return;
+          }
+          
           const settings = {
-            serverUrl: document.getElementById('serverUrl').value,
-            apiKey: document.getElementById('apiKey').value,
-            enabled: document.getElementById('enableSync').checked
+            serverUrl: serverUrl,
+            apiKey: apiKey,
+            enabled: enabled
           };
           
           chrome.storage.local.set({ syncSettings: settings }, () => {
-            alert('Settings saved!');
+            if (chrome.runtime.lastError) {
+              alert('Error saving settings: ' + chrome.runtime.lastError.message);
+            } else {
+              alert('Settings saved successfully!');
+            }
           });
         });
       </script>
