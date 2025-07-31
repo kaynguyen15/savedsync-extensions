@@ -183,7 +183,26 @@ async function syncToServer() {
       console.log('Successfully synced to server');
       return { success: true, message: 'Synced successfully' };
     } else {
-      throw new Error(`Server responded with ${response.status}`);
+      let errorMessage = `Server responded with ${response.status}`;
+      
+      try {
+        const errorData = await response.text();
+        if (errorData) {
+          errorMessage += `: ${errorData}`;
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+      
+      if (response.status === 401) {
+        errorMessage = 'Authentication failed. Check your API key.';
+      } else if (response.status === 404) {
+        errorMessage = 'Sync endpoint not found. Check your server URL.';
+      } else if (response.status >= 500) {
+        errorMessage = 'Server error. Please try again later.';
+      }
+      
+      throw new Error(errorMessage);
     }
     
   } catch (error) {

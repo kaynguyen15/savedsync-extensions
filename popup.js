@@ -12,6 +12,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('exportLink').addEventListener('click', exportData);
   document.getElementById('helpLink').addEventListener('click', openHelp);
   
+  // Settings panel event listeners
+  document.getElementById('closeSettings').addEventListener('click', closeSettings);
+  document.getElementById('settingsForm').addEventListener('submit', saveSettings);
+  document.getElementById('testConnection').addEventListener('click', testConnection);
+  
+  // Load current settings into the form
+  await loadCurrentSettings();
+  
   // Auto-refresh stats every 30 seconds
   setInterval(loadStats, 30000);
 });
@@ -169,80 +177,155 @@ async function syncNow() {
 }
 
 function openSettings() {
-  // Create a simple settings page
-  const settingsHTML = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>SavedSync Settings</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="url"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #0056b3; }
-        .info { background: #e7f3ff; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-      </style>
-    </head>
-    <body>
-      <h1>SavedSync Settings</h1>
-      
-      <div class="info">
-        <p><strong>Mobile App Integration:</strong> Configure these settings to sync your saved items with the mobile app.</p>
-      </div>
-      
-      <form id="settingsForm">
-        <div class="form-group">
-          <label for="serverUrl">Server URL:</label>
-          <input type="url" id="serverUrl" placeholder="https://your-app-backend.com/api" />
-        </div>
-        
-        <div class="form-group">
-          <label for="apiKey">API Key:</label>
-          <input type="text" id="apiKey" placeholder="Your mobile app API key" />
-        </div>
-        
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="enableSync" /> Enable automatic sync
-          </label>
-        </div>
-        
-        <button type="submit">Save Settings</button>
-      </form>
-      
-      <script>
-        // Load current settings
-        chrome.storage.local.get(['syncSettings'], (result) => {
-          const settings = result.syncSettings || {};
-          document.getElementById('serverUrl').value = settings.serverUrl || '';
-          document.getElementById('apiKey').value = settings.apiKey || '';
-          document.getElementById('enableSync').checked = settings.enabled || false;
-        });
-        
-        // Save settings
-        document.getElementById('settingsForm').addEventListener('submit', (e) => {
-          e.preventDefault();
-          const settings = {
-            serverUrl: document.getElementById('serverUrl').value,
-            apiKey: document.getElementById('apiKey').value,
-            enabled: document.getElementById('enableSync').checked
-          };
-          
-          chrome.storage.local.set({ syncSettings: settings }, () => {
-            alert('Settings saved!');
-          });
-        });
-      </script>
-    </body>
-    </html>
-  `;
+  document.getElementById('settingsPanel').classList.remove('hidden');
+}
+
+function closeSettings() {
+  document.getElementById('settingsPanel').classList.add('hidden');
+}
+
+async function loadCurrentSettings() {
+  try {
+    const result = await chrome.storage.local.get(['syncSettings']);
+    const settings = result.syncSettings || {};
+    
+    document.getElementById('serverUrl').value = settings.serverUrl || '';
+    document.getElementById('apiKey').value = settings.apiKey || '';
+    document.getElementById('enableSync').checked = settings.enabled || false;
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  }
+}
+
+async function saveSettings(e) {
+  e.preventDefault();
   
-  // Create a new tab with settings
-  const blob = new Blob([settingsHTML], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  chrome.tabs.create({ url });
+  const serverUrl = document.getElementById('serverUrl').value.trim();
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const enabled = document.getElementById('enableSync').checked;
+  
+  // Validate URL format
+  if (serverUrl && !isValidUrl(serverUrl)) {
+    showConnectionStatus('Invalid URL format. Please enter a valid HTTP/HTTPS URL.', 'error');
+    return;
+  }
+  
+  // Remove trailing slash from URL
+  const cleanUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
+  
+  const settings = {
+    serverUrl: cleanUrl,
+    apiKey: apiKey,
+    enabled: enabled
+  };
+  
+  try {
+    await chrome.storage.local.set({ syncSettings: settings });
+    showConnectionStatus('Settings saved successfully!', 'success');
+    
+    // Refresh stats to update sync status
+    setTimeout(() => {
+      loadStats();
+      closeSettings();
+    }, 1500);
+    
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    showConnectionStatus('Failed to save settings.', 'error');
+  }
+}
+
+async function testConnection() {
+  const serverUrl = document.getElementById('serverUrl').value.trim();
+  const apiKey = document.getElementById('apiKey').value.trim();
+  
+  if (!serverUrl) {
+    showConnectionStatus('Please enter a server URL first.', 'error');
+    return;
+  }
+  
+  if (!isValidUrl(serverUrl)) {
+    showConnectionStatus('Invalid URL format. Please enter a valid HTTP/HTTPS URL.', 'error');
+    return;
+  }
+  
+  const testBtn = document.getElementById('testConnection');
+  const originalText = testBtn.textContent;
+  
+  try {
+    testBtn.disabled = true;
+    testBtn.textContent = 'Testing...';
+    showConnectionStatus('Testing connection to your backend...', 'info');
+    
+    // Remove trailing slash and test connection
+    const cleanUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
+    
+    // Try a simple health check first
+    const healthResponse = await fetch(`${cleanUrl}/health`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+      }
+    });
+    
+    if (healthResponse.ok) {
+      showConnectionStatus('✅ Connection successful! Your backend is reachable.', 'success');
+    } else {
+      // If health check fails, try the sync endpoint
+      const syncResponse = await fetch(`${cleanUrl}/sync/bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+        },
+        body: JSON.stringify({ 
+          items: [],
+          timestamp: new Date().toISOString(),
+          test: true
+        })
+      });
+      
+      if (syncResponse.ok || syncResponse.status === 400) {
+        // 400 might be expected for empty test data
+        showConnectionStatus('✅ Connection successful! Sync endpoint is reachable.', 'success');
+      } else if (syncResponse.status === 401) {
+        showConnectionStatus('⚠️ Connected but authentication failed. Check your API key.', 'error');
+      } else if (syncResponse.status === 404) {
+        showConnectionStatus('⚠️ Connected but sync endpoint not found. Check your URL path.', 'error');
+      } else {
+        showConnectionStatus(`❌ Server responded with status ${syncResponse.status}. Check your backend configuration.`, 'error');
+      }
+    }
+    
+  } catch (error) {
+    console.error('Connection test failed:', error);
+    
+    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      showConnectionStatus('❌ Cannot reach server. Check URL and ensure CORS is configured.', 'error');
+    } else {
+      showConnectionStatus(`❌ Connection failed: ${error.message}`, 'error');
+    }
+  } finally {
+    testBtn.disabled = false;
+    testBtn.textContent = originalText;
+  }
+}
+
+function isValidUrl(string) {
+  try {
+    const url = new URL(string);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch (e) {
+    return false;
+  }
+}
+
+function showConnectionStatus(message, type) {
+  const statusDiv = document.getElementById('connectionStatus');
+  statusDiv.textContent = message;
+  statusDiv.className = `connection-status ${type}`;
+  statusDiv.classList.remove('hidden');
 }
 
 async function exportData() {
